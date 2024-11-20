@@ -2,3 +2,5 @@ huggingface_hub
 opencv-python
 supervision
 ultralytics
+facenet-pytorch
+tensorboard
