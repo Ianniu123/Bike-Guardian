@@ -1,5 +1,6 @@
 import cv2
 import torch
+import threading
 
 from facenet_pytorch import InceptionResnetV1, fixed_image_standardization
 from huggingface_hub import hf_hub_download
@@ -8,7 +9,12 @@ from supervision import Detections
 from PIL import Image
 from torchvision.transforms import v2
 from scipy.spatial.distance import euclidean
+from playsound import playsound
 
+#https://arxiv.org/pdf/1412.6622
+#https://github.com/timesler/facenet-pytorch
+#https://www.kaggle.com/datasets/jessicali9530/lfw-dataset
+#https://arxiv.org/abs/1712.04621
 read_pipeline = v2.Compose([
     v2.ToImage(),
     v2.ToDtype(torch.float32, scale=True),
@@ -20,12 +26,15 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 model_path = hf_hub_download(repo_id="arnabdhar/YOLOv8-Face-Detection", cache_dir="./models", filename="model.pt")
 model = YOLO(model_path)
 
-state = torch.load("./model2.pt", weights_only=True)
+state = torch.load("./models/recognition_model/model.pt", weights_only=True)
 verification_model = InceptionResnetV1(classify=False, pretrained='vggface2').to(device)
 verification_model.logits = None
 verification_model.load_state_dict(state)
 
-original = read_pipeline(Image.open("data\original\Ian\Ian02.jpg")).unsqueeze(0)
+original = read_pipeline(Image.open("./data/original/Ian.jpg")).unsqueeze(0)
+
+incorrect_counts = 0
+incorrect_counts_bound = 200
 
 def verify_face(filename):
     input = read_pipeline(Image.open(filename)).unsqueeze(0)
@@ -41,6 +50,8 @@ def verify_face(filename):
     return distance < 0.7
 
 def detect_bounding_box(frame):
+    global incorrect_counts
+    
     output = model(frame, verbose=False)
     results = Detections.from_ultralytics(output[0])
     
@@ -62,10 +73,18 @@ def detect_bounding_box(frame):
         cv2.imwrite(filename, resized_image)
             
         if verify_face(filename):
-            cv2.putText(frame, 'Ian', (x1, y1), font, fontScale, correct_color, thickness, cv2.LINE_AA)
+            incorrect_counts = 0
+            cv2.putText(frame, 'Ian', (x1, y1 - 10), font, fontScale, correct_color, thickness, cv2.LINE_AA)
         else:
-            cv2.putText(frame, 'UNKNOWN', (x1, y1), font, fontScale, incorrect_color, thickness, cv2.LINE_AA)
-            
+            incorrect_counts += 1
+            cv2.putText(frame, 'UNKNOWN', (x1, y1 - 10), font, fontScale, incorrect_color, thickness, cv2.LINE_AA)
+        
+        print(incorrect_counts)
+        
+        if incorrect_counts == incorrect_counts_bound:
+            incorrect_counts = 0
+            threading.Thread(target=playsound, args=('./data/sound/effect.mp3',), daemon=True).start()
+        
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 4)
                 
     if len(results.xyxy > 0):
